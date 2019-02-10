@@ -1,0 +1,6 @@
+{
+  "learning_rate": 1e-3,
+  "batch_size": 32,
+  "image_size": 224,
+  "loss": "SmoothL1Loss"
+}
