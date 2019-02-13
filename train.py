@@ -1,4 +1,5 @@
 import argparse
+import os
 
 import torch
 from torch import optim, nn
@@ -23,6 +24,8 @@ class InitiateTraining(object):
         self.pre_trained = args.pre_trained
         self.config = args.config
         self.epoch = args.epoch
+        self.experiment = args.experiment
+        self.save_model = args.save_model
         self.localization_model = LocalizationNetwork(pre_trained=self.pre_trained, epoch=self.epoch)
         self.optimizer = optim.Adam(self.localization_model.parameters(), lr=1e-3)
         self.criterion = nn.SmoothL1Loss()
@@ -32,6 +35,9 @@ class InitiateTraining(object):
         self.best_epoch = 1e+10
         self.best_accuracy = 1e+10
         self.batch_size = 32
+
+        if os.path.exists(self.save_model):
+            os.makedirs(self.save_model)
 
     def train(self):
         self.localization_model  # use cuda
@@ -114,7 +120,16 @@ class InitiateTraining(object):
                     idx + 1, epochs, total_accuracy, total_loss, val_accuracy, val_loss))
 
             if val_accuracy < self.best_accuracy:
-                self.best_epoch = train_epoch + 1
+                self.best_epoch = train_epoch
+
+                torch.save({
+                    'epoch': train_epoch,
+                    'model_state_dict': self.localization_model.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict(),
+                    'loss': total_loss,
+                    'accuracy': total_accuracy
+                }, self.save_model_path)
+
                 print("=> Best Epoch: {}, Accuracy: {:3f}".format(self.best_epoch, val_accuracy))
 
 
@@ -129,6 +144,9 @@ def main():
     parser.add_argument('-c', '--config', help='Path of the hyperparameter configuration file',
                         default='./configuration/config.json')
     parser.add_argument('-e', '--epoch', help='Epoch value for start from the checkpoint', default=0)
+    parser.add_argument('-exp', '--experiment', help='Experiment number to save the models', default=1)
+    parser.add_argument('-sm', '--save_model', help='Path for saving the best model during training',
+                        default='./models')
 
     args = parser.parse_args()
     model = InitiateTraining(args)
