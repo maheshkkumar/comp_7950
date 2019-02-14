@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from torchvision import transforms
 
-from dataloader.data_utils import read_file
+from data_utils import read_file
 
 # seeding random variable to reproduce results
 np.random.seed(0)
@@ -56,7 +56,7 @@ class CUBDataset(Dataset):
 
     def __getitem__(self, index):
         image = self.images[index]
-        image_path = os.path.join('/Users/mahesh/workspace/courses/comp_7950/images/', image)
+        image_path = os.path.join('./images/', image)
         img, img_size = self.custom_transform(image_path)
 
         if self.mode == 'test':
@@ -70,8 +70,8 @@ class CUBDataset(Dataset):
 
 
 if __name__ == '__main__':
-    train_set = CUBDataset('/Users/mahesh/workspace/courses/comp_7950/dataset/train_images.txt',
-                           '/Users/mahesh/workspace/courses/comp_7950/dataset/train_boxes.txt', mode='train',
+    train_set = CUBDataset('./dataset/train_images.txt',
+                           './dataset/train_boxes.txt', mode='train',
                            split_rate=0.8,
                            transform=transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor(),
                                                          transforms.Normalize([0.485, 0.456, 0.406],

@@ -2,6 +2,7 @@ import argparse
 import os
 
 import torch
+from tensorboardX import SummaryWriter
 from torch import optim, nn
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
@@ -29,19 +30,27 @@ class InitiateTraining(object):
         self.localization_model = LocalizationNetwork(pre_trained=self.pre_trained, epoch=self.epoch)
         self.optimizer = optim.Adam(self.localization_model.parameters(), lr=1e-3)
         self.criterion = nn.SmoothL1Loss()
-        self.transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor(),
-                                             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+        self.transform = transforms.Compose(
+            [transforms.Resize((224, 224)),
+             transforms.ToTensor(), transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
         self.hyperparameters = read_file(self.config)
         self.best_epoch = 1e+10
         self.best_accuracy = 1e+10
         self.batch_size = 32
+        self.writer = SummaryWriter()
 
-        if os.path.exists(self.save_model):
+        if not os.path.exists(self.save_model):
             os.makedirs(self.save_model)
 
+    def set_bn_eval(self, m):
+        classname = m.__class__.__name__
+        if classname.find('BatchNorm') != -1:
+            for parameter in m.parameters():
+                parameter.requires_grad = False
+
     def train(self):
-        self.localization_model  # use cuda
-        self.criterion  # use cuda
+        self.localization_model.to(device)  # use cuda
+        self.criterion.to(device)  # use cuda
         self.lr_scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=5, gamma=0.1)
 
         train_set = CUBDataset(self.train_path, self.label_path, mode='train', split_rate=self.split_rate,
@@ -61,11 +70,15 @@ class InitiateTraining(object):
             # training the localization network
             for batch_idx, data in enumerate(train_loader):
                 self.localization_model.train()
+
+                # freezing batch normalization layers
+                # self.localization_model.apply(self.set_bn_eval)
+
                 img, label, img_size = data
                 label = box_transform(xywh_to_x1y1x2y2(label), img_size)
 
-                _input = Variable(img)  # use cuda(device)
-                _target = Variable(label)  # use cuda
+                _input = Variable(img.to(device))  # use cuda(device)
+                _target = Variable(label.to(device))  # use cuda
 
                 # resetting optimizer to not remove old gradients
                 self.optimizer.zero_grad()
@@ -100,8 +113,8 @@ class InitiateTraining(object):
                 img, label, img_size = data
                 label = box_transform(xywh_to_x1y1x2y2(label), img_size)
 
-                _input = Variable(img)  # use cuda
-                _target = Variable(label)  # use cuda
+                _input = Variable(img.to(device))  # use cuda
+                _target = Variable(label.to(device))  # use cuda
 
                 with torch.no_grad():
                     output = self.localization_model(_input)
@@ -119,6 +132,11 @@ class InitiateTraining(object):
                 "Epoch: {}/{}, Training Accuracy: {:3f}, Training Loss: {:3f}, Validation Accuracy: {:3f}, Validation Loss: {:3f}".format(
                     idx + 1, epochs, total_accuracy, total_loss, val_accuracy, val_loss))
 
+            self.writer.add_scalar('training_loss', total_loss, train_epoch + 1)
+            self.writer.add_scalar('training_accuracy', total_accuracy, train_epoch + 1)
+            self.writer.add_scalar('validation_loss', val_loss, train_epoch + 1)
+            self.writer.add_scalar('validation_accuracy', val_accuracy, train_epoch + 1)
+
             if val_accuracy < self.best_accuracy:
                 self.best_epoch = train_epoch
 
@@ -128,10 +146,11 @@ class InitiateTraining(object):
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'loss': total_loss,
                     'accuracy': total_accuracy
-                }, self.save_model_path)
+                }, self.save_model)
 
                 print("=> Best Epoch: {}, Accuracy: {:3f}".format(self.best_epoch, val_accuracy))
 
+        self.writer.close()
 
 def main():
     parser = argparse.ArgumentParser()
