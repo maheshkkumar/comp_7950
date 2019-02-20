@@ -2,13 +2,13 @@ import argparse
 import os
 
 import torch
+import torchvision
 from tensorboardX import SummaryWriter
 from torch import optim, nn
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from architecture.network import LocalizationNetwork
 from dataloader.data_utils import read_file, compute_acc, box_transform, xywh_to_x1y1x2y2
 from dataloader.dataloader import CUBDataset
 
@@ -27,8 +27,6 @@ class InitiateTraining(object):
         self.epoch = args.epoch
         self.experiment = args.experiment
         self.save_model = args.save_model
-        self.localization_model = LocalizationNetwork(pre_trained=self.pre_trained, epoch=self.epoch)
-        self.optimizer = optim.Adam(self.localization_model.parameters(), lr=1e-3)
         self.criterion = nn.SmoothL1Loss()
         self.transform = transforms.Compose(
             [transforms.Resize((224, 224)),
@@ -36,7 +34,7 @@ class InitiateTraining(object):
         self.hyperparameters = read_file(self.config)
         self.best_epoch = 1e+10
         self.best_accuracy = 1e+10
-        self.batch_size = 32
+        self.batch_size = self.hyperparameters['batch_size']
         self.writer = SummaryWriter()
 
         if not os.path.exists(self.save_model):
@@ -49,14 +47,26 @@ class InitiateTraining(object):
                 parameter.requires_grad = False
 
     def train(self):
-        self.localization_model.to(device)  # use cuda
-        self.criterion.to(device)  # use cuda
-        self.lr_scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=5, gamma=0.1)
 
-        train_set = CUBDataset(self.train_path, self.label_path, mode='train', split_rate=self.split_rate,
+        model = torchvision.models.resnet18(pretrained=True)
+        optimizer = optim.Adam(model.parameters(), lr=1e-3)
+
+        # logic to check for pre-trained weights from earlier checkpoint
+        if self.pre_trained is not None:
+            pre_trained_model = torch.load(self.pre_trained)
+            model.load_state_dict(pre_trained_model)
+        else:
+            fc_features = model.fc.in_features
+            model.fc = nn.Linear(fc_features, 4)
+
+        model.to(device)  # use cuda
+        self.criterion.to(device)  # use cuda
+        self.lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
+
+        train_set = CUBDataset(self.train_path, label_path=self.label_path, mode='train', split_rate=self.split_rate,
                                transform=self.transform)
         train_loader = DataLoader(train_set, batch_size=self.batch_size, shuffle=True)
-        validation_set = CUBDataset(self.train_path, self.label_path, mode='validation', split_rate=self.split_rate,
+        validation_set = CUBDataset(self.train_path, label_path=self.label_path, mode='validation', split_rate=self.split_rate,
                                     transform=self.transform)
         validation_loader = DataLoader(validation_set, batch_size=self.batch_size, shuffle=True)
 
@@ -69,7 +79,7 @@ class InitiateTraining(object):
 
             # training the localization network
             for batch_idx, data in enumerate(train_loader):
-                self.localization_model.train()
+                model.train()
 
                 # freezing batch normalization layers
                 # self.localization_model.apply(self.set_bn_eval)
@@ -81,15 +91,15 @@ class InitiateTraining(object):
                 _target = Variable(label.to(device))  # use cuda
 
                 # resetting optimizer to not remove old gradients
-                self.optimizer.zero_grad()
+                optimizer.zero_grad()
 
                 # forward pass
-                output = self.localization_model(_input)
+                output = model(_input)
 
                 # backward pass
                 loss = self.criterion(output, _target)
                 loss.backward()
-                self.optimizer.step()
+                optimizer.step()
 
                 # compute accuracy for the prediction
                 accuracy = compute_acc(output.data.cpu(), _target.data.cpu(), img_size)
@@ -109,7 +119,7 @@ class InitiateTraining(object):
 
             val_accuracy, val_loss = 0.0, 0.0
             for batch_idx, data in enumerate(validation_loader):
-                self.localization_model.train(False)
+                model.train(False)
                 img, label, img_size = data
                 label = box_transform(xywh_to_x1y1x2y2(label), img_size)
 
@@ -117,7 +127,7 @@ class InitiateTraining(object):
                 _target = Variable(label.to(device))  # use cuda
 
                 with torch.no_grad():
-                    output = self.localization_model(_input)
+                    output = model(_input)
 
                 loss = self.criterion(output, _target)
                 accuracy = compute_acc(output.data.cpu(), _target.data.cpu(), img_size)
@@ -140,17 +150,13 @@ class InitiateTraining(object):
             if val_accuracy < self.best_accuracy:
                 self.best_epoch = train_epoch
 
-                torch.save({
-                    'epoch': train_epoch,
-                    'model_state_dict': self.localization_model.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                    'loss': total_loss,
-                    'accuracy': total_accuracy
-                }, self.save_model)
+                torch.save(model.state_dict(),
+                           os.path.join(self.save_model, str(self.experiment) + '_model.pt'))
 
                 print("=> Best Epoch: {}, Accuracy: {:3f}".format(self.best_epoch, val_accuracy))
 
         self.writer.close()
+
 
 def main():
     parser = argparse.ArgumentParser()

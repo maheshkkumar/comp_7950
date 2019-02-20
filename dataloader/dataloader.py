@@ -17,8 +17,9 @@ class CUBDataset(Dataset):
     Overriding Dataset class to handle custom dataset
     """
 
-    def __init__(self, image_path, label_path, mode='train', split_rate=None, transform=None):
+    def __init__(self, image_path, mode='train', split_rate=None, transform=None, label_path=None):
         self.image_list = read_file(image_path)
+
         self.mode = mode
         if not self.mode == 'test':
             self.label_list = read_file(label_path)
@@ -27,6 +28,7 @@ class CUBDataset(Dataset):
         self.split_rate = split_rate
         self.transform = transform
         self.total_length = len(self.image_list)
+        self.images = self.image_list
 
         if self.split_rate is not None:
             self.train_length = int(self.total_length * self.split_rate)
@@ -38,7 +40,7 @@ class CUBDataset(Dataset):
                 self.images = self.image_list[self.train_length:]
                 self.labels = self.label_list[self.train_length:]
             else:
-                self.images = self.image_list
+                pass
 
     def custom_transform(self, img):
         img = Image.open(img).convert('RGB')
