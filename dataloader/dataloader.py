@@ -51,9 +51,8 @@ class CUBDataset(Dataset):
 
         return img, img_size
 
-    def custom_label(self, label, img_size):
+    def custom_label(self, label):
         labels = np.array(list(map(lambda _: int(float(_)), label.split(' '))), dtype=np.float32)
-        # labels = box_transform(xywh_to_x1y1x2y2(labels), img_size)
         return labels
 
     def __getitem__(self, index):
@@ -64,7 +63,7 @@ class CUBDataset(Dataset):
         if self.mode == 'test':
             return img, img_size
         else:
-            labels = self.custom_label(self.labels[index], img_size)
+            labels = self.custom_label(self.labels[index])
             return img, labels, img_size
 
     def __len__(self):

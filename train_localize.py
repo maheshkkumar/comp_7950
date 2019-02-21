@@ -9,7 +9,7 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from dataloader.data_utils import read_file, compute_acc, box_transform, xywh_to_x1y1x2y2
+from dataloader.data_utils import read_file, compute_acc, box_transform
 from dataloader.dataloader import CUBDataset
 
 # seeding random variable to reproduce results
@@ -28,26 +28,31 @@ class InitiateTraining(object):
         self.experiment = args.experiment
         self.save_model = args.save_model
         self.criterion = nn.SmoothL1Loss()
-        self.transform = transforms.Compose(
-            [transforms.Resize((224, 224)),
-             transforms.ToTensor(), transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
         self.hyperparameters = read_file(self.config)
         self.best_epoch = 1e+10
         self.best_accuracy = 1e+10
         self.batch_size = self.hyperparameters['batch_size']
+        self.transform = transforms.Compose(
+            [transforms.Resize((self.hyperparameters['image_size'], self.hyperparameters['image_size'])),
+             transforms.ToTensor(), transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
         self.writer = SummaryWriter()
 
         if not os.path.exists(self.save_model):
             os.makedirs(self.save_model)
 
     def set_bn_eval(self, m):
+        """
+        Method to freeze batch normalization layers in the pre-trained network
+        """
         classname = m.__class__.__name__
         if classname.find('BatchNorm') != -1:
             for parameter in m.parameters():
                 parameter.requires_grad = False
 
     def train(self):
-
+        """
+        Method to initiate training
+        """
         model = torchvision.models.resnet18(pretrained=True)
         optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
@@ -59,18 +64,19 @@ class InitiateTraining(object):
             fc_features = model.fc.in_features
             model.fc = nn.Linear(fc_features, 4)
 
-        model.to(device)  # use cuda
-        self.criterion.to(device)  # use cuda
+        model.to(device)
+        self.criterion.to(device)
         self.lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
 
         train_set = CUBDataset(self.train_path, label_path=self.label_path, mode='train', split_rate=self.split_rate,
                                transform=self.transform)
         train_loader = DataLoader(train_set, batch_size=self.batch_size, shuffle=True)
-        validation_set = CUBDataset(self.train_path, label_path=self.label_path, mode='validation', split_rate=self.split_rate,
+        validation_set = CUBDataset(self.train_path, label_path=self.label_path, mode='validation',
+                                    split_rate=self.split_rate,
                                     transform=self.transform)
         validation_loader = DataLoader(validation_set, batch_size=self.batch_size, shuffle=True)
 
-        epochs = 10
+        epochs = self.hyperparameters['epochs']
         print("==> Starting Training")
         for idx, train_epoch in enumerate(range(epochs)):
 
@@ -82,10 +88,10 @@ class InitiateTraining(object):
                 model.train()
 
                 # freezing batch normalization layers
-                # self.localization_model.apply(self.set_bn_eval)
+                # model.apply(self.set_bn_eval)
 
                 img, label, img_size = data
-                label = box_transform(xywh_to_x1y1x2y2(label), img_size)
+                label = box_transform(label, img_size)
 
                 _input = Variable(img.to(device))  # use cuda(device)
                 _target = Variable(label.to(device))  # use cuda
@@ -121,10 +127,10 @@ class InitiateTraining(object):
             for batch_idx, data in enumerate(validation_loader):
                 model.train(False)
                 img, label, img_size = data
-                label = box_transform(xywh_to_x1y1x2y2(label), img_size)
+                label = box_transform(label, img_size)
 
-                _input = Variable(img.to(device))  # use cuda
-                _target = Variable(label.to(device))  # use cuda
+                _input = Variable(img.to(device))
+                _target = Variable(label.to(device))
 
                 with torch.no_grad():
                     output = model(_input)

@@ -1,6 +1,5 @@
 import argparse
 import math
-import os
 
 import torchvision
 from torch import nn
@@ -28,12 +27,10 @@ class InitiateTesting(object):
         self.hyperparameters = read_file(self.config)
         self.batch_size = self.hyperparameters['batch_size']
 
-        if not os.path.exists(self.save_output):
-            os.makedirs(self.save_output)
-
-        self.save_output = os.path.join(args.save_output, 'results.txt')
-
     def test(self):
+        """
+        Method to test the trained localization network
+        """
         output_boxes = []
 
         model = torchvision.models.resnet18(pretrained=True)
@@ -45,7 +42,7 @@ class InitiateTesting(object):
             pre_trained_model = torch.load(self.pre_trained)
             model.load_state_dict(pre_trained_model)
 
-        model.to(device)  # use cuda
+        model.to(device)
 
         test_set = CUBDataset(self.test_path, mode='test', transform=self.transform)
         test_loader = DataLoader(test_set, batch_size=self.batch_size, shuffle=False)
@@ -58,18 +55,14 @@ class InitiateTesting(object):
         for batch_idx, data in enumerate(test_loader):
             img, img_size = data
 
-            _input = Variable(img.to(device))  # use cuda
+            _input = Variable(img.to(device))
 
             with torch.no_grad():
                 output = model(_input)
 
-            box_coordinates = box_transform_inv(output.data.cpu(), img_size)
-            xywh = x1y1x2y2_to_xywh(box_coordinates)
-            # output_boxes.append(xywh.data.numpy())
+            xywh = box_transform_inv(output.data.cpu(), img_size)
             for value in xywh.data.numpy():
-                print(type(value))
                 value = map(math.ceil, value.tolist())
-                print(value)
                 output_boxes.append(value)
 
         with open(self.save_output, 'w') as f:
@@ -87,7 +80,7 @@ def main():
     parser.add_argument('-c', '--config', help='Path of the hyperparameter configuration file',
                         default='./configuration/config.json')
     parser.add_argument('-so', '--save_output', help='Path for saving the test output',
-                        default='./results')
+                        default='./output.txt')
 
     args = parser.parse_args()
     test_localization = InitiateTesting(args)
